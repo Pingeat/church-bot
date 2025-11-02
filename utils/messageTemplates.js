@@ -7,9 +7,9 @@ const contactBlock = `
 
 const socialBlock = `
 📱 Follow us online:
-• Instagram: https://instagram.com/churchontherockintl
+• Instagram: @churchontherock_
 • YouTube: https://www.youtube.com/@churchontherockinternation6917
-• Facebook: https://www.facebook.com/churchontherockinternational
+• Facebook: https://www.facebook.com/peopleontherock/about
 `;
 
 const templates = {
@@ -39,20 +39,16 @@ You can also reply:
 • *Menu* to see this list again`,
 
   churchInfo: () =>
-    `🏠 *About Church on the Rock*
-We are a multicultural family with a heart to impact Scarborough and beyond through the love of Jesus.
+    `🏠 * Church On The Rock*
+Church on the Rock is a multicultural family of believers with a passion to impact communities locally and globally.
 
 🕘 *Service Gatherings*
 • Sundays 10:00 AM – 11:30 AM (In-person & Livestream)
-• Wednesday Bible Study 7:00 PM (Zoom)
+• Wednesday Bible Study 7:00 PM 
+• Prayer link and ID for all Zoom Prayers
   Meeting ID: 416 409 6248
   Passcode: 900550
 
-🤝 *Ministries*
-• Kids on the Rock
-• Youth & Young Adults
-• Small Groups & Discipleship
-• Outreach & Missions
 ${socialBlock}
 ${contactBlock}`,
 
