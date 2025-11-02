@@ -1,8 +1,36 @@
-const { sendTextMessage } = require("./services/whatsappService");
-const { getLogger } = require("./utils/logger");
-const logger = getLogger("church_message_handler");
+const { sendTextMessage } = require('./services/whatsappService');
+const { getLogger } = require('./utils/logger');
+const { templates } = require('./utils/messageTemplates');
 
-const members = {}; // simple memory store
+const logger = getLogger('church_message_handler');
+
+const members = {}; // in-memory demo store
+
+const MENU_KEYWORDS = new Set(['1', 'church info', 'about', 'info']);
+const PRAYER_KEYWORDS = new Set(['2', 'prayer', 'prayer request']);
+const DONATION_KEYWORDS = new Set(['3', 'donate', 'offering', 'offerings', 'tithe']);
+const SERMON_KEYWORDS = new Set(['4', 'sermon', 'sermon replay', 'sermons']);
+const EVENTS_KEYWORDS = new Set(['5', 'events', 'event', 'check-in', 'checkin']);
+
+function sanitizeText(input = '') {
+  return input.trim();
+}
+
+function normalizeCommand(input = '') {
+  return sanitizeText(input).toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/i.test(value);
+}
+
+async function sendMessages(to, ...messages) {
+  for (const message of messages) {
+    if (message) {
+      await sendTextMessage(to, message);
+    }
+  }
+}
 
 async function handleIncomingMessage(data) {
   try {
@@ -10,108 +38,252 @@ async function handleIncomingMessage(data) {
       for (const change of entry.changes || []) {
         const value = change.value || {};
         const messages = value.messages || [];
-        if (!messages.length) continue;
+        if (!messages.length) {
+          continue;
+        }
 
         const msg = messages[0];
         const sender = msg.from;
-        const type = msg.type;
-        const text = type === "text" ? msg.text.body.trim().toLowerCase() : "";
+        const messageType = msg.type;
+        if (messageType !== 'text') {
+          logger.info(`Ignoring non-text message from ${sender}`);
+          continue;
+        }
 
-        // Registration flow
+        const rawBody = sanitizeText(msg.text?.body || '');
+        const text = normalizeCommand(rawBody);
+        if (!rawBody) {
+          continue;
+        }
+
         if (!members[sender]) {
-          members[sender] = { stage: "new" };
-          await sendTextMessage(
-            sender,
-            "🙏 Welcome to *Church on the Rock*! Please share your *first name* to get started."
-          );
+          members[sender] = {
+            stage: 'awaiting_name',
+            profile: {
+              phone: sender,
+              consent: 'pending',
+            },
+            interactions: [],
+            subscriptions: { sermon: false },
+          };
+
+          logger.info(`New visitor detected: ${sender}`);
+          await sendMessages(sender, templates.welcomeIntro(), templates.askFirstName());
           continue;
         }
 
         const user = members[sender];
 
-        if (user.stage === "new") {
-          user.name = msg.text.body.trim();
-          user.stage = "email";
-          await sendTextMessage(sender, `Thanks ${user.name}! Please share your *email address*.`);
-          continue;
-        }
-
-        if (user.stage === "email") {
-          user.email = msg.text.body.trim();
-          user.stage = "menu";
-          await sendTextMessage(
+        if (user.profile.consent === 'opted-out' && text !== 'start') {
+          await sendMessages(
             sender,
-            `🎉 Great! You’re now registered.\n\n*Main Menu*\n1️⃣ Church Info\n2️⃣ Prayer Request\n3️⃣ Donate / Offerings\n4️⃣ Sermon Replay 🎥\n5️⃣ Events & Check-in 🎟️`
+            'You are currently unsubscribed. Reply START to resume updates from Church on the Rock.'
           );
           continue;
         }
 
-        // Menu options
-        if (["1", "church info", "about"].includes(text)) {
-          await sendTextMessage(
+        if (text === 'start') {
+          user.profile.consent = 'opted-in';
+          user.stage = 'menu';
+          await sendMessages(sender, 'Welcome back! Here is what I can help you with:', templates.menu());
+          continue;
+        }
+
+        if (user.stage === 'awaiting_name') {
+          user.profile.firstName = rawBody.split(' ')[0];
+          user.profile.displayName = rawBody;
+          user.stage = 'awaiting_email';
+          await sendTextMessage(sender, templates.askEmail(user.profile.firstName));
+          continue;
+        }
+
+        if (user.stage === 'awaiting_email') {
+          if (!isValidEmail(rawBody)) {
+            await sendTextMessage(
+              sender,
+              'Thanks! Could you double-check that email address? It should look like name@example.com.'
+            );
+            continue;
+          }
+
+          user.profile.email = rawBody.toLowerCase();
+          user.profile.consent = 'opted-in';
+          user.stage = 'menu';
+          logger.info(`Registered profile for ${sender}: ${user.profile.firstName} <${user.profile.email}>`);
+
+          await sendMessages(
             sender,
-            `🏠 *Church on the Rock*\nChurch on the Rock is a multicultural family of believers with a passion to impact communities locally and globally..\n\n
-            join us in person every Sunday at 10 am
-            \n4548 Sheppard Avenue East,Scarborough,\nON M1S1V2(SDA Church building)
-            \n\n🕘 *Service Times:*\nSunday 10:00 AM – 11:30 AM\nWednesday Bible Study 7:00 PM\n\n
-            Prayer link and ID for all Zoom Prayers
-            \n Meeting ID: 416 409 6248
-            \nPassword is 900550
-            \n\n📱 Follow us:\nInstagram | YouTube | Facebook`
+            templates.registrationComplete(user.profile.firstName),
+            templates.menu(),
+            templates.celebrationsInfo()
           );
           continue;
         }
 
-        if (["2", "prayer", "prayer request"].includes(text)) {
-          user.stage = "prayer";
-          await sendTextMessage(sender, "🙏 Please share your prayer request details.");
+        if (user.stage === 'collecting_prayer') {
+          user.interactions.push({
+            type: 'prayer',
+            message: rawBody,
+            recordedAt: new Date().toISOString(),
+          });
+          logger.info(`Prayer request captured for ${sender}`);
+          user.stage = 'menu';
+
+          await sendMessages(sender, templates.prayerAcknowledgement(), templates.menu());
           continue;
         }
 
-        if (["3", "donate", "offering", "tithe"].includes(text)) {
-          await sendTextMessage(
+        if (user.stage === 'collecting_receipt_email') {
+          if (!isValidEmail(rawBody)) {
+            await sendTextMessage(
+              sender,
+              'Thanks! Please send a valid email address so we can issue your tax receipt.'
+            );
+            continue;
+          }
+
+          user.profile.receiptEmail = rawBody.toLowerCase();
+          user.stage = 'menu';
+          await sendMessages(
             sender,
-            `💒 *Donation Options:*\n• e-Transfer: donate@churchontherock.ca\n• Bank Transfer: Details on request\n• In-person: Sundays 10:00–11:30 AM\n\n💌 Tax receipts available upon request.`
+            templates.donationReceiptConfirmation(user.profile.receiptEmail),
+            templates.menu()
           );
           continue;
         }
 
-        if (["4", "sermon", "sermon replay"].includes(text)) {
-          await sendTextMessage(
+        if (user.stage === 'awaiting_event_code') {
+          const eventCode = rawBody.toUpperCase();
+          user.interactions.push({
+            type: 'event_checkin',
+            code: eventCode,
+            recordedAt: new Date().toISOString(),
+          });
+          user.stage = 'menu';
+          logger.info(`Event check-in code ${eventCode} recorded for ${sender}`);
+
+          await sendMessages(sender, templates.checkInConfirmation(eventCode), templates.menu());
+          continue;
+        }
+
+        if (user.stage === 'collecting_birthday') {
+          user.profile.birthday = rawBody;
+          user.stage = 'menu';
+          logger.info(`Birthday captured for ${sender}: ${rawBody}`);
+          await sendMessages(
             sender,
-            `🎥 *Latest Sermon:*\n"Worship & Miracle Night" — Watch now: https://www.youtube.com/@churchontherockinternation6917/streams`
+            `🎉 Beautiful! We'll celebrate you on ${rawBody}.`,
+            templates.menu()
           );
           continue;
         }
 
-        if (["5", "events", "check-in"].includes(text)) {
-          await sendTextMessage(
+        if (user.stage === 'collecting_anniversary') {
+          user.profile.anniversary = rawBody;
+          user.stage = 'menu';
+          logger.info(`Anniversary captured for ${sender}: ${rawBody}`);
+          await sendMessages(
             sender,
-            `🎟️ *Upcoming Events:*\n• Youth Night — Oct 20\n• Baptism Sunday — Nov 3\n\nScan the QR at the entrance to check-in!\nAfter the event, we’ll share the sermon link automatically 🙌`
+            `💍 Wonderful! We'll send a blessing note for your anniversary on ${rawBody}.`,
+            templates.menu()
           );
           continue;
         }
 
-        if (user.stage === "prayer") {
-          await sendTextMessage(
-            sender,
-            "🙏 Thank you! Your prayer request has been forwarded to our Prayer Team."
-          );
-          user.stage = "menu";
+        if (['menu', 'help', 'options', 'start over', 'hi', 'hello'].includes(text)) {
+          await sendMessages(sender, templates.menu());
           continue;
         }
 
-        // Default
-        await sendTextMessage(
-          sender,
-          "💬 Please reply with one of these options:\n1️⃣ Church Info\n2️⃣ Prayer Request\n3️⃣ Donate / Offerings\n4️⃣ Sermon Replay\n5️⃣ Events & Check-in"
-        );
+        if (MENU_KEYWORDS.has(text)) {
+          await sendMessages(sender, templates.churchInfo());
+          continue;
+        }
+
+        if (PRAYER_KEYWORDS.has(text)) {
+          user.stage = 'collecting_prayer';
+          await sendMessages(sender, templates.prayerPrompt());
+          continue;
+        }
+
+        if (DONATION_KEYWORDS.has(text)) {
+          await sendMessages(sender, templates.donationOptions());
+          continue;
+        }
+
+        if (['bank details', 'bank', 'account'].includes(text)) {
+          await sendMessages(sender, templates.bankDetails());
+          continue;
+        }
+
+        if (text === 'receipt') {
+          user.stage = 'collecting_receipt_email';
+          await sendMessages(sender, templates.donationReceiptPrompt());
+          continue;
+        }
+
+        if (SERMON_KEYWORDS.has(text)) {
+          await sendMessages(sender, templates.sermonLatest());
+          continue;
+        }
+
+        if (['previous sermons', 'past sermons', 'archive'].includes(text)) {
+          await sendMessages(sender, templates.sermonPrevious());
+          continue;
+        }
+
+        if (['sermon updates', 'subscribe sermon', 'sermon subscription'].includes(text)) {
+          user.subscriptions.sermon = true;
+          await sendMessages(sender, templates.sermonSubscription());
+          continue;
+        }
+
+        if (EVENTS_KEYWORDS.has(text)) {
+          user.stage = 'awaiting_event_code';
+          await sendMessages(sender, templates.eventsOverview());
+          continue;
+        }
+
+        if (['verse', 'daily verse', 'devotional'].includes(text)) {
+          await sendMessages(sender, templates.dailyVerse());
+          continue;
+        }
+
+        if (text.startsWith('birthday')) {
+          user.stage = 'collecting_birthday';
+          await sendMessages(
+            sender,
+            '🎂 We would love to celebrate you! Please reply with your birthday (MM-DD).'
+          );
+          continue;
+        }
+
+        if (text.startsWith('anniversary')) {
+          user.stage = 'collecting_anniversary';
+          await sendMessages(
+            sender,
+            '💑 Amazing! Please reply with your anniversary date (MM-DD).'
+          );
+          continue;
+        }
+
+        if (text === 'stop' || text === 'opt out' || text === 'unsubscribe') {
+          user.profile.consent = 'opted-out';
+          await sendMessages(
+            sender,
+            "You've been unsubscribed from automated messages. Reply START anytime to reconnect."
+          );
+          continue;
+        }
+
+        await sendMessages(sender, templates.defaultFallback());
       }
     }
-    return { status: "ok" };
+
+    return { status: 'ok' };
   } catch (err) {
     logger.error(`handleIncomingMessage error: ${err}`);
-    return { status: "error" };
+    return { status: 'error' };
   }
 }
 
