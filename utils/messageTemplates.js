@@ -114,6 +114,12 @@ Have a blessed time! We'll send follow-up resources after the gathering.`,
   celebrationsInfo: () =>
     "🎉 Want birthday or anniversary blessings? Reply with *Birthday* or *Anniversary* and your date, and we'll schedule a greeting!",
 
+  birthdayGreeting: (name) =>
+    `🎂 Happy Birthday, ${name}! We thank God for your life and pray this year is filled with His goodness.\n📖 *Psalm 139:14* — "I praise You because I am fearfully and wonderfully made."`,
+
+  anniversaryGreeting: (name) =>
+    `💞 Happy Anniversary, ${name}! May God continue to strengthen and bless your union.\n📖 *1 Corinthians 13:7* — "Love bears all things, believes all things, hopes all things, endures all things."`,
+
   defaultFallback: () =>
     `💬 I’m here to help! Please choose one of these options:
 1️⃣ Church Info

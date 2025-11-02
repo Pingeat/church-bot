@@ -1,4 +1,5 @@
 const { sendTextMessage } = require('./services/whatsappService');
+const { PRAYER_TEAM_RECIPIENTS } = require('./config/prayerTeam');
 const { getLogger } = require('./utils/logger');
 const { templates } = require('./utils/messageTemplates');
 
@@ -22,6 +23,102 @@ function normalizeCommand(input = '') {
 
 function isValidEmail(value) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/i.test(value);
+}
+
+function getPreferredName(profile = {}) {
+  return profile.displayName || profile.firstName || 'there';
+}
+
+function parseMonthDay(value) {
+  if (!value) {
+    return null;
+  }
+
+  const segments = String(value)
+    .trim()
+    .split(/[-/]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (segments.length === 2) {
+    const [monthStr, dayStr] = segments;
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (
+      Number.isInteger(month) &&
+      Number.isInteger(day) &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
+    ) {
+      return { month, day };
+    }
+  } else if (segments.length === 3) {
+    const [first, second, third] = segments;
+    let monthStr;
+    let dayStr;
+
+    if (first.length === 4) {
+      // yyyy-mm-dd
+      monthStr = second;
+      dayStr = third;
+    } else if (third.length === 4) {
+      // mm-dd-yyyy
+      monthStr = first;
+      dayStr = second;
+    } else {
+      // fallback assume mm-dd-yy
+      monthStr = first;
+      dayStr = second;
+    }
+
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    if (
+      Number.isInteger(month) &&
+      Number.isInteger(day) &&
+      month >= 1 &&
+      month <= 12 &&
+      day >= 1 &&
+      day <= 31
+    ) {
+      return { month, day };
+    }
+  }
+
+  return null;
+}
+
+function isTodayCelebration(value) {
+  const parts = parseMonthDay(value);
+  if (!parts) {
+    return false;
+  }
+
+  const today = new Date();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+  return parts.month === todayMonth && parts.day === todayDay;
+}
+
+async function forwardPrayerRequest(user, requestText) {
+  if (!PRAYER_TEAM_RECIPIENTS.length) {
+    logger.warn('Prayer team recipients list is empty. Skipping notification.');
+    return;
+  }
+
+  const preferredName = getPreferredName(user.profile);
+  const notification = [
+    '🙏 *New Prayer Request*',
+    `Name: ${preferredName}`,
+    `Phone: ${user.profile.phone}`,
+    `Request: ${requestText}`,
+  ].join('\n');
+
+  for (const recipient of PRAYER_TEAM_RECIPIENTS) {
+    await sendTextMessage(recipient, notification);
+  }
 }
 
 async function sendMessages(to, ...messages) {
@@ -108,15 +205,25 @@ async function handleIncomingMessage(data) {
 
           user.profile.email = rawBody.toLowerCase();
           user.profile.consent = 'opted-in';
+          user.profile.registeredAt = new Date().toISOString();
           user.stage = 'menu';
           logger.info(`Registered profile for ${sender}: ${user.profile.firstName} <${user.profile.email}>`);
 
-          await sendMessages(
-            sender,
+          const registrationMessages = [
             templates.registrationComplete(user.profile.firstName),
-            templates.menu(),
-            templates.celebrationsInfo()
-          );
+          ];
+
+          const preferredName = getPreferredName(user.profile);
+          if (isTodayCelebration(user.profile.birthday)) {
+            registrationMessages.push(templates.birthdayGreeting(preferredName));
+          }
+          if (isTodayCelebration(user.profile.anniversary)) {
+            registrationMessages.push(templates.anniversaryGreeting(preferredName));
+          }
+
+          registrationMessages.push(templates.menu(), templates.celebrationsInfo());
+
+          await sendMessages(sender, ...registrationMessages);
           continue;
         }
 
@@ -128,6 +235,8 @@ async function handleIncomingMessage(data) {
           });
           logger.info(`Prayer request captured for ${sender}`);
           user.stage = 'menu';
+
+          await forwardPrayerRequest(user, rawBody);
 
           await sendMessages(sender, templates.prayerAcknowledgement(), templates.menu());
           continue;
@@ -170,11 +279,13 @@ async function handleIncomingMessage(data) {
           user.profile.birthday = rawBody;
           user.stage = 'menu';
           logger.info(`Birthday captured for ${sender}: ${rawBody}`);
-          await sendMessages(
-            sender,
-            `🎉 Beautiful! We'll celebrate you on ${rawBody}.`,
-            templates.menu()
-          );
+          const messagesToSend = [`🎉 Beautiful! We'll celebrate you on ${rawBody}.`];
+          if (isTodayCelebration(rawBody)) {
+            messagesToSend.push(templates.birthdayGreeting(getPreferredName(user.profile)));
+          }
+          messagesToSend.push(templates.menu());
+
+          await sendMessages(sender, ...messagesToSend);
           continue;
         }
 
@@ -182,11 +293,13 @@ async function handleIncomingMessage(data) {
           user.profile.anniversary = rawBody;
           user.stage = 'menu';
           logger.info(`Anniversary captured for ${sender}: ${rawBody}`);
-          await sendMessages(
-            sender,
-            `💍 Wonderful! We'll send a blessing note for your anniversary on ${rawBody}.`,
-            templates.menu()
-          );
+          const messagesToSend = [`💍 Wonderful! We'll send a blessing note for your anniversary on ${rawBody}.`];
+          if (isTodayCelebration(rawBody)) {
+            messagesToSend.push(templates.anniversaryGreeting(getPreferredName(user.profile)));
+          }
+          messagesToSend.push(templates.menu());
+
+          await sendMessages(sender, ...messagesToSend);
           continue;
         }
 
