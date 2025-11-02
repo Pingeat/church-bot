@@ -50,7 +50,14 @@ async function handleIncomingMessage(data) {
         if (["1", "church info", "about"].includes(text)) {
           await sendTextMessage(
             sender,
-            `🏠 *Church on the Rock*\nVision: Building lives on the Rock – Christ Jesus.\n\n🕘 *Service Times:*\nSunday 10:00 AM – 11:30 AM\nWednesday Bible Study 7:00 PM\n\n📱 Follow us:\nInstagram | YouTube | Facebook`
+            `🏠 *Church on the Rock*\nChurch on the Rock is a multicultural family of believers with a passion to impact communities locally and globally..\n\n
+            join us in person every Sunday at 10 am
+            \n4548 Sheppard Avenue East,Scarborough,\nON M1S1V2(SDA Church building)
+            \n\n🕘 *Service Times:*\nSunday 10:00 AM – 11:30 AM\nWednesday Bible Study 7:00 PM\n\n
+            Prayer link and ID for all Zoom Prayers
+            \n Meeting ID: 416 409 6248
+            \nPassword is 900550
+            \n\n📱 Follow us:\nInstagram | YouTube | Facebook`
           );
           continue;
         }
@@ -72,7 +79,7 @@ async function handleIncomingMessage(data) {
         if (["4", "sermon", "sermon replay"].includes(text)) {
           await sendTextMessage(
             sender,
-            `🎥 *Latest Sermon:*\n"Faith Over Fear" — Watch now: https://youtu.be/sample-sermon-link`
+            `🎥 *Latest Sermon:*\n"Worship & Miracle Night" — Watch now: https://www.youtube.com/@churchontherockinternation6917/streams`
           );
           continue;
         }
